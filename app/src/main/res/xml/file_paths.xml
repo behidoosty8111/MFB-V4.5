@@ -2,4 +2,5 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <files-path name="built_apks" path="builds/" />
     <cache-path name="build_workspaces" path="build_workspaces/" />
+    <external-files-path name="build_staging" path="termux_staging/" />
 </paths>

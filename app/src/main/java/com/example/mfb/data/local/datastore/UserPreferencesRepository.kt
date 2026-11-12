@@ -51,6 +51,7 @@ class UserPreferencesRepository(private val context: Context) {
         val PREVIEW_ZOOM_CONTROLS = booleanPreferencesKey("mfb_preview_zoom_controls")
         val PREVIEW_LAST_HISTORY = stringPreferencesKey("mfb_preview_last_history")
         val BUILD_SERVER_URL = stringPreferencesKey("mfb_build_server_url")
+        val BUILD_SERVER_AUTH_TOKEN = stringPreferencesKey("mfb_build_server_auth_token")
         fun editorSessionKey(projectId: Long) = stringPreferencesKey("mfb_editor_session_$projectId")
         fun previewProjectConfigKey(projectId: Long) = stringPreferencesKey("mfb_preview_project_config_$projectId")
     }
@@ -349,6 +350,20 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun setBuildServerUrl(url: String) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.BUILD_SERVER_URL] = url.trim()
+        }
+    }
+
+    val buildServerAuthTokenFlow: Flow<String> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences()) else throw exception
+        }
+        .map { preferences ->
+            preferences[PreferencesKeys.BUILD_SERVER_AUTH_TOKEN] ?: ""
+        }
+
+    suspend fun setBuildServerAuthToken(token: String) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.BUILD_SERVER_AUTH_TOKEN] = token.trim()
         }
     }
 }

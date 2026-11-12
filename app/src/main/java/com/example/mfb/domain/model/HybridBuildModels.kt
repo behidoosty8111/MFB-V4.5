@@ -98,7 +98,8 @@ data class LocalBuildCompatibilityReport(
     val supportLevel: BuildSupportLevel,
     val runtimeState: LocalRuntimeState = LocalRuntimeState.LOCAL_BUILD_UNSUPPORTED,
     val blockingReasons: List<String>,
-    val warnings: List<String>
+    val warnings: List<String>,
+    val termuxReport: com.example.mfb.data.build.termux.TermuxEnvironmentReport? = null
 )
 
 data class BuildProviderAvailability(

@@ -45,6 +45,11 @@ import com.example.mfb.domain.model.ProjectCategory
 import com.example.mfb.domain.model.ProjectHealthStatus
 import com.example.mfb.data.local.datastore.UserPreferencesRepository
 import com.example.mfb.data.repository.BuildRepositoryImpl
+import com.example.mfb.data.build.termux.TermuxBridge
+import com.example.mfb.data.build.termux.TermuxCommandResult
+import com.example.mfb.data.build.termux.TermuxEnvironmentReport
+import com.example.mfb.data.build.termux.TermuxExecutionBackend
+import com.example.mfb.data.build.termux.TermuxStatus
 import com.example.mfb.presentation.build.AssemblerViewModel
 import com.example.mfb.presentation.build.BuildPipelineScreen
 import com.example.ui.theme.MyApplicationTheme
@@ -73,7 +78,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36], qualifiers = "w411dp-h1200dp")
+@Config(sdk = [36], qualifiers = "w411dp-h2400dp")
 class MfbUniversalBuildRobolectricTest {
 
     @get:Rule
@@ -665,4 +670,84 @@ class MfbUniversalBuildRobolectricTest {
         val apkFile = (successResult as BuildExecutionOutcome.Success).apkFile
         assertTrue(BuildOutputValidator.validateApk(apkFile).base.isValid)
     }
+
+    @Test
+    fun testTermuxBridgeCommandSafetyValidation() {
+        // Safe command should succeed
+        assertTrue(
+            TermuxBridge.validateCommandSafety(
+                commandPath = "/data/data/com.termux/files/usr/bin/bash",
+                arguments = arrayOf("-c", "echo hello")
+            ).isSuccess
+        )
+
+        // Path traversal in arguments should be rejected
+        val traversalResult = TermuxBridge.validateCommandSafety(
+            commandPath = "/data/data/com.termux/files/usr/bin/bash",
+            arguments = arrayOf("-c", "cat /data/data/com.example.mfb/databases/mfb.db")
+        )
+        assertTrue("References to private MFB directories must fail validation", traversalResult.isFailure)
+
+        // Shell metacharacter injection in arguments should be rejected
+        val injectionResult = TermuxBridge.validateCommandSafety(
+            commandPath = "/data/data/com.termux/files/usr/bin/bash",
+            arguments = arrayOf("build.sh; rm -rf /")
+        )
+        assertTrue("Metacharacter ';' in arguments must fail validation", injectionResult.isFailure)
+
+        // Path traversal '..' in commandPath should be rejected
+        val pathTraversalResult = TermuxBridge.validateCommandSafety(
+            commandPath = "/data/data/com.termux/files/usr/bin/../bin/sh",
+            arguments = arrayOf()
+        )
+        assertTrue("Path traversal '..' in commandPath must fail validation", pathTraversalResult.isFailure)
+    }
+
+    @Test
+    fun testTermuxBridgeCreateRunCommandIntent() {
+        val intent = TermuxBridge.createRunCommandIntent(
+            context = context,
+            scriptPath = "/data/data/com.termux/files/usr/bin/bash",
+            arguments = arrayOf("/sdcard/test.sh"),
+            workDir = "/sdcard",
+            background = true,
+            sessionAction = "0"
+        )
+        assertNotNull(intent)
+        assertEquals(TermuxBridge.ACTION_RUN_COMMAND, intent.action)
+        assertEquals(TermuxBridge.TERMUX_PACKAGE_NAME, intent.`package`)
+        assertEquals(TermuxBridge.TERMUX_PACKAGE_NAME, intent.component?.packageName)
+        assertEquals(TermuxBridge.TERMUX_SERVICE_NAME, intent.component?.className)
+        assertEquals("/data/data/com.termux/files/usr/bin/bash", intent.getStringExtra(TermuxBridge.EXTRA_RUN_COMMAND_PATH))
+        assertEquals("/sdcard", intent.getStringExtra(TermuxBridge.EXTRA_RUN_COMMAND_WORKDIR))
+        assertTrue(intent.getBooleanExtra(TermuxBridge.EXTRA_RUN_COMMAND_BACKGROUND, false))
+        assertEquals("0", intent.getStringExtra(TermuxBridge.EXTRA_RUN_COMMAND_SESSION_ACTION))
+        assertNotNull(intent.getParcelableExtra(TermuxBridge.EXTRA_RUN_COMMAND_PENDING_INTENT, android.app.PendingIntent::class.java))
+    }
+
+    @Test
+    fun testTermuxEnvironmentInspectionReportsStatus() {
+        val report = TermuxBridge.inspectTermuxEnvironment(context)
+        assertNotNull(report)
+        // In the test sandbox without Termux installed, status should be TERMUX_NOT_INSTALLED
+        assertEquals(TermuxStatus.TERMUX_NOT_INSTALLED, report.status)
+        assertFalse(report.isInstalled)
+        assertFalse(report.hasRunCommandPermission)
+        assertFalse(report.status.isReady)
+    }
+
+    @Test
+    fun testTermuxLauncherScriptGeneration() {
+        val script = TermuxBridge.generateLauncherScript(
+            stagingDir = File(context.cacheDir, "staging"),
+            gradleTask = "assembleDebug",
+            jobUuid = "test-job-123"
+        )
+        assertTrue("Script must exist", script.exists())
+        val content = script.readText()
+        assertTrue("Script must specify bash shebang", content.startsWith("#!/data/data/com.termux/files/usr/bin/bash"))
+        assertTrue("Script must execute gradle assembleDebug", content.contains("assembleDebug"))
+        assertTrue("Script must contain job ID", content.contains("test-job-123"))
+    }
 }
+
